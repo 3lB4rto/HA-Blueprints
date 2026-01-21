@@ -1,0 +1,71 @@
+blueprint:
+  name: Z-Wave Controller (4 Buttons - Any Press Type)
+  description: >
+    Blueprint for Z-Wave wall controllers using Central Scene (CC 91).
+    Each button (001-004) triggers its action regardless of the press type 
+    (Value 0, 1, or 2).
+  domain: automation
+  author: 3lB4rto
+  input:
+    zwave_device:
+      name: Z-Wave Device
+      description: Select the Z-Wave Wall Controller.
+      selector:
+        device:
+          integration: zwave_js
+
+    button_001_action:
+      name: Button 1 (Scene 001) Action
+      description: Action to execute when button 1 is pressed.
+      default: []
+      selector:
+        action:
+
+    button_002_action:
+      name: Button 2 (Scene 002) Action
+      description: Action to execute when button 2 is pressed.
+      default: []
+      selector:
+        action:
+
+    button_003_action:
+      name: Button 3 (Scene 003) Action
+      description: Action to execute when button 3 is pressed.
+      default: []
+      selector:
+        action:
+
+    button_004_action:
+      name: Button 4 (Scene 004) Action
+      description: Action to execute when button 4 is pressed.
+      default: []
+      selector:
+        action:
+
+mode: single
+
+trigger:
+  - platform: event
+    event_type: zwave_js_value_notification
+    event_data:
+      device_id: !input zwave_device
+      command_class: 91
+      property: scene
+
+action:
+  - variables:
+      # Define the button key from the event data
+      key: "{{ trigger.event.data.property_key }}"
+
+  - choose:
+      - conditions: "{{ key == '001' }}"
+        sequence: !input button_001_action
+
+      - conditions: "{{ key == '002' }}"
+        sequence: !input button_002_action
+
+      - conditions: "{{ key == '003' }}"
+        sequence: !input button_003_action
+
+      - conditions: "{{ key == '004' }}"
+        sequence: !input button_004_action
