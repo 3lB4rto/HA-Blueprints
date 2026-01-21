@@ -1,0 +1,101 @@
+blueprint:
+  name: "Battery Health Monitor (Daily Checks)"
+  description: >
+    Checks all devices using the Battery Notes integration twice a day.
+    If a device is low or stops reporting, it sends a notification with the exact battery type needed.
+    
+    **How to configure the Notification Action:**
+    1. Select "Send a notification" (or your specific mobile_app service).
+    2. For the Title, type: `{{ title }}`
+    3. For the Message, type: `{{ message }}`
+  domain: automation
+  input:
+    time_check_1:
+      name: First Check Time
+      description: Time to run the first daily scan.
+      default: "10:00:00"
+      selector:
+        time: {}
+    time_check_2:
+      name: Second Check Time
+      description: Time to run the second daily scan.
+      default: "17:00:00"
+      selector:
+        time: {}
+    offline_days:
+      name: "Offline Threshold (Days)"
+      description: >
+        How many days of silence before flagging a device as 'Dead'.
+        Set to 1 to catch devices that missed a daily report (>24h).
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: days
+    notification_action:
+      name: Notification Action
+      description: >
+        What to do when an alert is found. 
+        IMPORTANT: Use `{{ title }}` and `{{ message }}` in your notification text to see the device name and battery type.
+      selector:
+        action: {}
+
+mode: queued
+max: 10
+
+trigger:
+  - trigger: time
+    at: !input time_check_1
+  - trigger: time
+    at: !input time_check_2
+  - trigger: event
+    event_type: battery_notes_battery_threshold
+    event_data:
+      battery_low: true
+  - trigger: event
+    event_type: battery_notes_battery_not_reported
+
+action:
+  - choose:
+      # ----------------------------------------------------------
+      # LOGIC 1: IT IS TIME TO SCAN (Triggered by Clock)
+      # ----------------------------------------------------------
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "0" # First Time
+              - condition: trigger
+                id: "1" # Second Time
+        sequence:
+          - action: battery_notes.check_battery_low
+          - action: battery_notes.check_battery_last_reported
+            data:
+              days_last_reported: !input offline_days
+
+      # ----------------------------------------------------------
+      # LOGIC 2: AN ISSUE WAS FOUND (Triggered by Event)
+      # ----------------------------------------------------------
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: "{{ trigger.event.event_type == 'battery_notes_battery_threshold' }}"
+              - condition: template
+                value_template: "{{ trigger.event.event_type == 'battery_notes_battery_not_reported' }}"
+        sequence:
+          # Define the text variables here so the user can just use {{ title }} and {{ message }}
+          - variables:
+              title: "⚠️ Battery Alert: {{ trigger.event.data.device_name }}"
+              message: >
+                {% if trigger.event.event_type == 'battery_notes_battery_threshold' %}
+                  Battery is low ({{ trigger.event.data.battery_level }}%).
+                {% else %}
+                  Device hasn't reported in {{ trigger.event.data.battery_last_reported_days }} days.
+                {% endif %}
+                
+                Buy: {{ trigger.event.data.battery_quantity }}x {{ trigger.event.data.battery_type }}
+          
+          # Run the action the user selected in the Blueprint UI
+          - action: !input notification_action
