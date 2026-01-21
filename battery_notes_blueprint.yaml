@@ -3,12 +3,21 @@ blueprint:
   description: >
     Checks all devices using the Battery Notes integration twice a day.
     
-    If a device is low or stops reporting, it triggers the notification action you define.
+    Any device found with low battery or no report (>24h) will trigger a notification
+    to the specific phones you select below.
   domain: automation
   author: 3lB4rto
   homeassistant:
     min_version: 2024.1.0
   input:
+    notify_devices:
+      name: Devices to Notify
+      description: Select the phones or tablets that should receive the alerts.
+      default: []
+      selector:
+        device:
+          integration: mobile_app
+          multiple: true
     time_check_1:
       name: First Check Time
       description: Time to run the first daily scan.
@@ -32,13 +41,6 @@ blueprint:
           max: 30
           unit_of_measurement: days
           mode: slider
-    notification_action:
-      name: Notification Action
-      description: >
-        Choose your device/phone here. 
-        IMPORTANT: In the Message field, type `{{ message }}` and in the Title field type `{{ title }}`.
-      selector:
-        action: {}
 
 mode: queued
 max: 10
@@ -84,15 +86,16 @@ action:
               - condition: template
                 value_template: "{{ trigger.event.event_type == 'battery_notes_battery_not_reported' }}"
         sequence:
-          # Prepare the text variables for the user
+          # Prepare the variables first
           - variables:
               device_name: "{{ trigger.event.data.device_name }}"
               battery_level: "{{ trigger.event.data.battery_level | default('Unknown') }}"
               days_silent: "{{ trigger.event.data.battery_last_reported_days | default(0) }}"
               battery_qty: "{{ trigger.event.data.battery_quantity }}"
               battery_type: "{{ trigger.event.data.battery_type }}"
-              title: "⚠️ Battery Alert: {{ device_name }}"
-              message: >
+              # This constructs the message content automatically
+              msg_title: "⚠️ Battery Alert: {{ device_name }}"
+              msg_content: >
                 {% if trigger.event.event_type == 'battery_notes_battery_threshold' %}
                   Battery is low ({{ battery_level }}%).
                 {% else %}
@@ -100,6 +103,13 @@ action:
                 {% endif %}
                 
                 Buy: {{ battery_qty }}x {{ battery_type }}
-          
-          # Execute the user's chosen notification action
-          - action: !input notification_action
+
+          # Loop through every selected phone and send the message
+          - repeat:
+              for_each: !input notify_devices
+              sequence:
+                - domain: mobile_app
+                  type: notify
+                  device_id: "{{ repeat.item }}"
+                  title: "{{ msg_title }}"
+                  message: "{{ msg_content }}"
