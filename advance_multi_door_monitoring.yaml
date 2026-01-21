@@ -1,0 +1,104 @@
+blueprint:
+  name: 🚪 Advanced Multi-Door Monitor & Reminders
+  description: |
+    Select multiple doors/windows and multiple mobile devices. 
+    It will notify you which specific doors are open and repeat the alert every few minutes until everything is closed.
+  domain: automation
+  author: 3lB4rto
+  input:
+    door_entities:
+      name: 🚪 Doors to Monitor
+      description: Select the door/window sensors you want to watch.
+      selector:
+        target:
+          entity:
+            domain: binary_sensor
+            device_class: 
+              - door
+              - window
+              - opening
+    notify_devices:
+      name: 📲 Notification Devices
+      description: Select one or more phones to receive the alerts.
+      selector:
+        device:
+          filter:
+            integration: mobile_app
+          multiple: true
+    reminder_interval:
+      name: ⏳ Reminder Interval
+      description: How often to remind you (e.g., every 3 minutes).
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: minutes
+    initial_delay:
+      name: ⏰ Time before first alert
+      description: How long a door must stay open before the first notification.
+      default: 0
+      selector:
+        duration:
+
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: 
+      # We extract the entities from the target selector in the action
+      - binary_sensor.dummy # Placeholder, logic handled in action
+    to: "on"
+    for: !input initial_delay
+
+# Since we want to monitor ANY of the selected doors, 
+# we trigger when any sensor in the target changes.
+trigger_variables:
+  monitored_entities: !input door_entities
+
+action:
+  - alias: "Wait for the condition to persist"
+    delay: !input initial_delay
+
+  - alias: "Repeat until all doors are closed"
+    repeat:
+      while:
+        # Continue as long as at least one selected door is 'on' (open)
+        - condition: template
+          value_template: >
+            {% set entities = label_entities('none') %} {# Placeholder for logic below #}
+            {% set target = monitored_entities.entity_id %}
+            {{ expand(target) | selectattr('state', 'eq', 'on') | list | count > 0 }}
+      sequence:
+        - variables:
+            # Get the names of the specific doors that are currently open
+            open_doors: >
+              {% set target = monitored_entities.entity_id %}
+              {{ expand(target) | selectattr('state', 'eq', 'on') | map(attribute='name') | join(', ') }}
+            # Get the notify service for each selected device
+            notify_targets: !input notify_devices
+
+        - alias: "Notify each selected device"
+          repeat:
+            for_each: "{{ notify_targets }}"
+            sequence:
+              - service: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+                data:
+                  title: "⚠️ Door(s) Left Open"
+                  message: "The following doors are still open: {{ open_doors }}. Please close them."
+                  data:
+                    tag: "door_monitor_alert" # This ensures the notification updates/overwrites
+                    group: "door-alerts"
+
+        - delay:
+            minutes: !input reminder_interval
+
+  - alias: "Clear notification when closed"
+    repeat:
+      for_each: !input notify_devices
+      sequence:
+        - service: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+          data:
+            message: "clear_notification"
+            data:
+              tag: "door_monitor_alert"
